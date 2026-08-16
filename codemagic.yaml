@@ -1,0 +1,79 @@
+# Codemagic configuration for the Flutter Script-to-Video Generator.
+# Commit this file at the repository root.
+
+workflows:
+  android-release:
+    name: Script-to-Video Android Release
+    max_build_duration: 60
+    instance_type: linux_x2
+
+    environment:
+      flutter: stable
+      java: 17
+      vars:
+        APP_FLAVOR: ""
+      cache:
+        cache_paths:
+          - $FLUTTER_ROOT/.pub-cache
+          - $HOME/.gradle/caches
+          - $HOME/.gradle/wrapper
+
+    triggering:
+      events:
+        - push
+        - pull_request
+      branch_patterns:
+        - pattern: main
+          include: true
+          source: true
+
+    scripts:
+      - name: Verify Flutter and Java toolchains
+        script: |
+          set -e
+          flutter --version
+          java -version
+          flutter doctor -v
+
+      - name: Get Flutter dependencies
+        script: |
+          set -e
+          flutter pub get
+
+      - name: Verify Android permissions for local FFmpeg workflow
+        script: |
+          set -e
+          MANIFEST="android/app/src/main/AndroidManifest.xml"
+          test -f "$MANIFEST"
+
+          # The app downloads Pollinations visuals and renders media in its
+          # private cache directory. FFmpeg itself needs no Android permission;
+          # it reads and writes files inside the app sandbox.
+          grep -q 'android.permission.INTERNET' "$MANIFEST" || {
+            echo "Missing INTERNET permission in $MANIFEST" >&2
+            exit 1
+          }
+
+          # These are required only for older Android versions if a future
+          # export flow copies MP4 files into shared external storage.
+          grep -q 'android.permission.READ_EXTERNAL_STORAGE' "$MANIFEST" || {
+            echo "Missing READ_EXTERNAL_STORAGE compatibility permission in $MANIFEST" >&2
+            exit 1
+          }
+          grep -q 'android.permission.WRITE_EXTERNAL_STORAGE' "$MANIFEST" || {
+            echo "Missing WRITE_EXTERNAL_STORAGE compatibility permission in $MANIFEST" >&2
+            exit 1
+          }
+
+      - name: Build Android release APK
+        script: |
+          set -e
+          if [ -n "${APP_FLAVOR}" ]; then
+            flutter build apk --release --flavor "$APP_FLAVOR"
+          else
+            flutter build apk --release
+          fi
+
+    artifacts:
+      - build/app/outputs/flutter-apk/app-release.apk
+      - build/app/outputs/flutter-apk/*-release.apk
